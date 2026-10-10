@@ -9,20 +9,41 @@ const SECRET_FALLBACK = 'dev-secret-change-me';
 let _secretKey = null;      // 缓存 importKey 结果
 let _secretRaw = null;      // 缓存原始 secret 字符串，用于检测变更
 
-// ============ 工具函数 ============
+// ============ 环境变量读取（兼容 Makers / 边缘函数 / Node 运行时） ============
 
-function getSecret() {
-  return (typeof AUTH_SECRET !== 'undefined' && AUTH_SECRET) || SECRET_FALLBACK;
+function _envVar(name) {
+  // 1. 全局变量（边缘函数传统方式）
+  if (typeof globalThis !== 'undefined' && globalThis[name]) return globalThis[name];
+  if (typeof self !== 'undefined' && self[name]) return self[name];
+
+  // 2. Node.js process.env
+  if (typeof process !== 'undefined' && process.env && process.env[name]) {
+    return process.env[name];
+  }
+
+  return undefined;
 }
 
-function getTtl() {
-  if (typeof SESSION_SECONDS === 'undefined') return DEFAULT_TTL;
-  const n = parseInt(SESSION_SECONDS, 10);
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_TTL;
+function getSecret() {
+  const val = _envVar('AUTH_SECRET');
+  return (val && val.trim()) || SECRET_FALLBACK;
 }
 
 function getAdminPassword() {
-  return (typeof ADMIN_PASSWORD !== 'undefined' && ADMIN_PASSWORD) || '';
+  const val = _envVar('ADMIN_PASSWORD');
+  return (val && val.trim()) || '';
+}
+
+function getTtl() {
+  const val = _envVar('SESSION_SECONDS');
+  if (!val) return DEFAULT_TTL;
+  const n = parseInt(val, 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_TTL;
+}
+
+function isProduction() {
+  const env = _envVar('ENVIRONMENT');
+  return env === 'production';
 }
 
 // ============ HMAC 签名（带 key 缓存） ============
@@ -91,7 +112,7 @@ export async function verifyToken(token) {
   const expectedSig = await hmac(body);
   const expectedHex = [...expectedSig].map(b => b.toString(16).padStart(2, '0')).join('');
 
-  // 长度不一致直接返回 false（不泄露信息，因为 hex 长度是固定的 64 字符）
+  // 长度不一致直接返回 false
   if (expectedHex.length !== sigHex.length) return false;
 
   // 恒定时间比较 hex 字符串
@@ -118,8 +139,7 @@ export function getCookieToken(request) {
 
 export function setCookieHeaders(token) {
   const ttl = getTtl();
-  const secure = typeof ENVIRONMENT !== 'undefined' && ENVIRONMENT === 'production' 
-    ? 'Secure; ' : '';
+  const secure = isProduction() ? 'Secure; ' : '';
   return {
     'Set-Cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; Max-Age=${ttl}; HttpOnly; ${secure}SameSite=Lax`
   };
@@ -146,7 +166,12 @@ export function authFailedResponse(msg = '未登录或登录失效') {
 
 export async function checkPassword(password) {
   const want = getAdminPassword();
-  if (!want) return false;
+
+  // 环境变量未配置时直接拒绝（防止空密码绕过）
+  if (!want) {
+    console.error('[AUTH] ADMIN_PASSWORD is not set or empty. Check environment variable binding.');
+    return false;
+  }
 
   const a = new TextEncoder().encode(password || '');
   const b = new TextEncoder().encode(want);
@@ -160,7 +185,7 @@ export async function checkPassword(password) {
     diff |= ab ^ bb;
   }
 
-  // 额外比较长度（恒定时间，因为上面的循环已经消耗了时间）
+  // 额外比较长度
   diff |= (a.length ^ b.length);
 
   return diff === 0;
