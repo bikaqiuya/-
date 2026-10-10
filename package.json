@@ -1,1 +1,13 @@
-
+{
+  "name": "spice-db-edgeone",
+  "version": "1.0.0",
+  "private": true,
+  "description": "EdgeOne Pages Spice Database with KV",
+  "scripts": {
+    "dev": "edgeone pages dev",
+    "deploy": "edgeone pages deploy"
+  },
+  "devDependencies": {
+    "edgeone": "^1.0.0"
+  }
+}
