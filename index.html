@@ -1,1 +1,23 @@
+<input id="q" placeholder="输入名称/学名，如八角、Illicium" />
+<button onclick="load()">查询</button>
+<table id="tb">
+  <thead><tr><th>中文</th><th>学名</th><th>部位</th><th>12729.1</th><th>21725</th></tr></thead>
+  <tbody></tbody>
+</table>
 
+<script>
+async function load(){
+  const q = document.getElementById('q').value.trim();
+  const r = await fetch('/api/spices' + (q?('?q='+encodeURIComponent(q)):''));
+  const data = await r.json();
+  const tb = document.querySelector('#tb tbody');
+  tb.innerHTML = '';
+  data.forEach(x=>{
+    tb.insertAdjacentHTML('beforeend', `<tr>
+      <td>${x.name}</td><td><i>${x.botanical||''}</i></td>
+      <td>${x.part||''}</td><td>${x.std12729||''}</td><td>${x.std21725||''}</td>
+    </tr>`);
+  });
+}
+load();
+</script>
