@@ -1,1 +1,110 @@
+<div id="login">
+  <input id="pwd" type="password" placeholder="管理员密码" />
+  <button onclick="login()">登录</button>
+  <span id="msg"></span>
+</div>
 
+<div id="panel" style="display:none">
+  <button onclick="logout()">退出</button>
+  <button onclick="exportJson()">导出</button>
+  <input id="file" type="file" accept="application/json" />
+  <button onclick="importFile()">导入覆盖</button>
+
+  <form id="form">
+    <input id="f_name" placeholder="中文名" />
+    <input id="f_bot" placeholder="学名" />
+    <input id="f_part" placeholder="部位" />
+    <input id="f_12729" placeholder="GB/T 12729.1" />
+    <input id="f_21725" placeholder="GB/T 21725分类" />
+    <button type="button" onclick="addOrUpdate()">保存</button>
+  </form>
+
+  <table id="grid">
+    <thead><tr><th>名称</th><th>学名</th><th>部位</th><th>12729</th><th>21725</th><th>操作</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+async function api(path, opts={}){
+  const r = await fetch(path, Object.assign({credentials:'same-origin'}, opts));
+  if(r.status===401){ location.reload(); throw new Error('未登录'); }
+  return r.json();
+}
+
+async function login(){
+  const r = await fetch('/api/auth/login', {
+    method:'POST', credentials:'same-origin',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({password:$('pwd').value})
+  });
+  $('msg').textContent = r.ok ? '' : (await r.json()).error || '失败';
+  if(r.ok) boot();
+}
+
+async function logout(){
+  await fetch('/api/auth/logout',{method:'POST',credentials:'same-origin'});
+  $('panel').style.display='none'; $('login').style.display='block';
+}
+
+async function boot(){
+  const me = await fetch('/api/auth/me',{credentials:'same-origin'});
+  if(!me.ok){ $('panel').style.display='none'; $('login').style.display='block'; return; }
+  $('login').style.display='none'; $('panel').style.display='block';
+  refresh();
+}
+
+async function refresh(){
+  const list = await api('/api/spices');
+  const tb=$('grid').querySelector('tbody'); tb.innerHTML='';
+  list.forEach(x=>{
+    tb.insertAdjacentHTML('beforeend',`<tr>
+      <td>${x.name}</td><td><i>${x.botanical||''}</i></td><td>${x.part||''}</td>
+      <td>${x.std12729||''}</td><td>${x.std21725||''}</td>
+      <td>
+        <button onclick='fill(${JSON.stringify(x)})'>改</button>
+        <button onclick='del("${x.name}")'>删</button>
+      </td></tr>`);
+  });
+}
+
+function fill(x){
+  $('f_name').value=x.name; $('f_bot').value=x.botanical||'';
+  $('f_part').value=x.part||''; $('f_12729').value=x.std12729||'';
+  $('f_21725').value=x.std21725||'';
+}
+
+async function addOrUpdate(){
+  const name=$('f_name').value.trim(); if(!name) return alert('填名称');
+  const payload={name,botanical:$('f_bot').value,part:$('f_part').value,
+    std12729:$('f_12729').value,std21725:$('f_21725').value};
+  // 先试PUT，失败再POST
+  let r=await fetch('/api/spices?name='+encodeURIComponent(name),{method:'PUT',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r.status===404){ r=await fetch('/api/spices',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); }
+  if(r.ok){ $('form').reset(); refresh(); } else { alert((await r.json()).error||'失败'); }
+}
+
+async function del(name){
+  if(!confirm('删除 '+name)) return;
+  await api('/api/spices?name='+encodeURIComponent(name),{method:'DELETE'});
+  refresh();
+}
+
+async function exportJson(){
+  const data=await api('/api/spices/export');
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='spices.json'; a.click();
+}
+
+async function importFile(){
+  const f=$('file').files[0]; if(!f) return;
+  const text=await f.text(); const arr=JSON.parse(text);
+  const r=await api('/api/spices/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(arr)});
+  if(r.ok){ alert('导入'+r.count); refresh(); } else alert('导入失败');
+}
+
+boot();
+</script>
