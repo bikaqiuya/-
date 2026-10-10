@@ -1,10 +1,21 @@
 import { json, corsHeaders } from '../../_lib/cors.js';
 import { makeToken, setCookieHeaders, checkPassword } from '../../_lib/auth.js';
 
+// ============ 环境变量注入（Makers 关键修复） ============
+// Makers 通过 context.env 传入变量，需要手动挂到 globalThis 让 _lib/auth.js 读到
+function injectEnv(context) {
+  if (context && context.env) {
+    if (context.env.ADMIN_PASSWORD) globalThis.ADMIN_PASSWORD = context.env.ADMIN_PASSWORD;
+    if (context.env.AUTH_SECRET) globalThis.AUTH_SECRET = context.env.AUTH_SECRET;
+    if (context.env.SESSION_SECONDS) globalThis.SESSION_SECONDS = context.env.SESSION_SECONDS;
+    if (context.env.ENVIRONMENT) globalThis.ENVIRONMENT = context.env.ENVIRONMENT;
+  }
+}
+
 // ============ 常量 ============
 const MAX_FAILS = 5;           // 最大失败次数
 const FAIL_TTL = 900;          // 限流窗口 15 分钟（秒）
-const FAIL_KEY_PREFIX = '__auth_fails__';  // 限流 key 前缀（双下划线降低冲突概率）
+const FAIL_KEY_PREFIX = '__auth_fails__';  // 限流 key 前缀
 
 // ============ OPTIONS 预检 ============
 export async function onRequestOptions() {
@@ -20,6 +31,9 @@ export async function onRequestOptions() {
 // ============ POST 登录 ============
 export async function onRequestPost(context) {
   const { request } = context;
+
+  // ★ 关键：把 Makers env 注入到全局
+  injectEnv(context);
 
   // 构建基础响应头
   const baseHeaders = {
@@ -49,7 +63,7 @@ export async function onRequestPost(context) {
     || 'unknown';
   const failsKey = `${FAIL_KEY_PREFIX}${ip}`;
 
-  // 3. 限流检查（带错误处理，KV 异常时不阻塞登录）
+  // 3. 限流检查
   try {
     let fails = 0;
     const failsVal = await SPICE_KV.get(failsKey);
@@ -78,14 +92,11 @@ export async function onRequestPost(context) {
     try {
       await SPICE_KV.delete(failsKey);
     } catch (_) {
-      // 清除失败不影响登录流程
       console.warn('Failed to clear auth fails key:', failsKey);
     }
 
   } catch (kvErr) {
-    // KV 异常时记录日志但不阻塞登录（降级放行）
     console.error('KV operation error during login:', kvErr);
-    // 如果连 checkPassword 都因为 KV 异常而失败，需要兜底
     if (!(await checkPassword(password))) {
       return json({ error: '密码错误' }, 401, baseHeaders);
     }
