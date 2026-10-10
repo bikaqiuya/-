@@ -2,6 +2,16 @@ import { json, corsHeaders } from '../_lib/cors.js';
 import { getSpices, saveSpices } from '../_lib/kv.js';
 import { requireAdmin } from '../_lib/auth.js';
 
+// ============ 环境变量注入（Makers 关键修复） ============
+function injectEnv(context) {
+  if (context && context.env) {
+    if (context.env.ADMIN_PASSWORD) globalThis.ADMIN_PASSWORD = context.env.ADMIN_PASSWORD;
+    if (context.env.AUTH_SECRET) globalThis.AUTH_SECRET = context.env.AUTH_SECRET;
+    if (context.env.SESSION_SECONDS) globalThis.SESSION_SECONDS = context.env.SESSION_SECONDS;
+    if (context.env.ENVIRONMENT) globalThis.ENVIRONMENT = context.env.ENVIRONMENT;
+  }
+}
+
 // ============ 工具函数 ============
 
 // 字符串清理：去除首尾空格，限制长度，防基础 XSS
@@ -40,7 +50,7 @@ export async function onRequestOptions() {
   });
 }
 
-// GET - 公开查询
+// GET - 公开查询（不需要鉴权，不需要 injectEnv）
 export async function onRequestGet(context) {
   const { request } = context;
   const url = new URL(request.url);
@@ -60,7 +70,6 @@ export async function onRequestGet(context) {
       );
     }
     
-    // 返回时附加 CORS 头，确保跨域可用
     return json(list, 200, corsHeaders());
   } catch (err) {
     console.error('GET /api/spices error:', err);
@@ -70,6 +79,9 @@ export async function onRequestGet(context) {
 
 // POST - 新增（需登录）
 export async function onRequestPost(context) {
+  // ★ 注入环境变量
+  injectEnv(context);
+
   if (!(await requireAdmin(context.request))) {
     return json({ error: '需要登录' }, 401, corsHeaders());
   }
@@ -107,6 +119,9 @@ export async function onRequestPost(context) {
 
 // PUT - 修改（需登录）
 export async function onRequestPut(context) {
+  // ★ 注入环境变量
+  injectEnv(context);
+
   if (!(await requireAdmin(context.request))) {
     return json({ error: '需要登录' }, 401, corsHeaders());
   }
@@ -165,6 +180,9 @@ export async function onRequestPut(context) {
 
 // DELETE - 删除（需登录）
 export async function onRequestDelete(context) {
+  // ★ 注入环境变量
+  injectEnv(context);
+
   if (!(await requireAdmin(context.request))) {
     return json({ error: '需要登录' }, 401, corsHeaders());
   }
